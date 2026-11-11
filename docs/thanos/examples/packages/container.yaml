@@ -1,0 +1,85 @@
+# Generic user service from a container image (MVP: container image only; source builds deferred).
+apiVersion: thanos/v1alpha1
+kind: TechnologyPackage
+metadata:
+  catalog: core
+  name: container
+  version: 1.0.0
+  displayName: Container service
+  category: service
+  description: Runs a user-supplied, digest-pinned container image as a Deployment + Service.
+  illustrative: true
+spec:
+  requires:
+    kubernetes: ">=1.29"
+  configSchema:
+    type: object
+    additionalProperties: false
+    required: [image, containerPort]
+    properties:
+      image:
+        type: string
+        description: Image reference. Must be digest-pinned (@sha256:) outside dev environments.
+      containerPort: { type: integer, minimum: 1, maximum: 65535 }
+      replicas: { type: integer, minimum: 0, maximum: 20, default: 1 }
+      healthPath: { type: string, default: /healthz }
+      env:
+        type: object
+        additionalProperties: { type: string }
+      connections:
+        type: array
+        description: User-declared ports; each item must match package schema #/$defs/port.
+        items: { type: object }
+  validations:
+    - rule: "!config.image.endsWith(':latest')"
+      message: "Use a pinned tag or digest, not :latest."
+      path: /image
+  dynamicPorts:
+    configPath: /connections
+  ports:
+    - name: http
+      description: The service's own HTTP API, callable by other services.
+      direction: output
+      initiation: pull
+      bindings:
+        - protocol: http/1.1
+          formats: [json]
+          auth: [none, bearer]
+  deployer:
+    kind: kubernetes
+    kubernetes:
+      primary: Deployment/${instance.name}
+      templates:
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata: { name: "${instance.name}" }
+          spec:
+            replicas: "${config.replicas}"
+            selector: { matchLabels: { app.kubernetes.io/instance: "${instance.name}" } }
+            template:
+              metadata: { labels: { app.kubernetes.io/instance: "${instance.name}" } }
+              spec:
+                containers:
+                  - name: app
+                    image: "${config.image}"
+                    ports: [{ containerPort: "${config.containerPort}" }]
+                    env: "${envFrom(config.env, connections)}"
+                    readinessProbe: { httpGet: { path: "${config.healthPath}", port: "${config.containerPort}" } }
+                    securityContext: { allowPrivilegeEscalation: false, runAsNonRoot: true }
+        - apiVersion: v1
+          kind: Service
+          metadata: { name: "${instance.name}" }
+          spec:
+            selector: { app.kubernetes.io/instance: "${instance.name}" }
+            ports: [{ port: 80, targetPort: "${config.containerPort}" }]
+  readiness:
+    strategy: kstatus
+    timeout: 5m
+  outputs:
+    host: "${instance.name}.${env.namespace}.svc"
+    port: "80"
+  lifecycle:
+    update: in-place
+    delete: supported
+    rollback: reapply-previous
+    stateful: false

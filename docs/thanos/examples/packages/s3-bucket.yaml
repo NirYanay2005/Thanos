@@ -1,0 +1,53 @@
+# External-service technology: an S3-compatible bucket provisioned through an external API
+# by an HTTP deployer (Deployer Protocol v1). Thanos does not deploy the object store itself.
+apiVersion: thanos/v1alpha1
+kind: TechnologyPackage
+metadata:
+  catalog: core
+  name: s3-bucket
+  version: 0.3.0
+  displayName: S3-compatible bucket (external)
+  category: external
+  illustrative: true
+spec:
+  configSchema:
+    type: object
+    additionalProperties: false
+    required: [endpoint, bucket, credentials]
+    properties:
+      endpoint: { type: string, format: uri, description: "S3 API endpoint. Subject to the environment's egress allow-list." }
+      region: { type: string, default: us-east-1 }
+      bucket: { type: string, pattern: "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$" }
+      createIfMissing: { type: boolean, default: true }
+      credentials:
+        x-thanos-secret: true
+        type: object
+        required: [secretRef]
+  ports:
+    - name: objects
+      description: Writers push objects under a per-Glove prefix.
+      direction: input
+      initiation: push
+      bindings:
+        - protocol: s3/2006-03-01
+          formats: [json, avro, parquet, bytes]
+          auth: [aws-sigv4]
+          provisions: bucket-prefix
+  deployer:
+    kind: http
+    http:
+      image: registry.example.com/thanos/deployer-s3@sha256:0000000000000000000000000000000000000000000000000000000000000000
+      protocolVersion: v1
+      credentialsSecret: thanos-deployer-s3-credentials
+  readiness:
+    strategy: deployer
+    timeout: 2m
+  outputs:
+    endpoint: "${config.endpoint}"
+    bucket: "${config.bucket}"
+    credentialsSecret: "${config.credentials.secretRef.name}"
+  lifecycle:
+    update: in-place
+    delete: supported
+    rollback: unsupported
+    stateful: true

@@ -1,0 +1,66 @@
+# Kafka via the Strimzi operator (Red Hat distribution: Streams for Apache Kafka). KRaft-only.
+# Illustrative: exact CR shapes (Kafka + KafkaNodePool, KafkaTopic, KafkaUser) are verified in PoC-2.
+apiVersion: thanos/v1alpha1
+kind: TechnologyPackage
+metadata:
+  catalog: core
+  name: kafka
+  version: 1.0.0
+  displayName: Apache Kafka (Strimzi)
+  category: messaging
+  illustrative: true
+spec:
+  requires:
+    crds:
+      - { group: kafka.strimzi.io, kind: Kafka, version: v1beta2 }
+      - { group: kafka.strimzi.io, kind: KafkaTopic, version: v1beta2 }
+    operator:
+      packageName: strimzi-kafka-operator
+      installPolicy: UserManaged
+  configSchema:
+    type: object
+    additionalProperties: false
+    properties:
+      brokers: { type: integer, minimum: 1, maximum: 9, default: 1 }
+      storageSize: { type: string, default: 5Gi }
+      defaultPartitions: { type: integer, minimum: 1, default: 3 }
+  ports:
+    - name: ingest
+      description: Producers push records; each Glove into this port provisions one topic.
+      direction: input
+      initiation: push
+      bindings:
+        - protocol: kafka/3
+          formats: [json, avro, bytes]
+          auth: [none, scram-sha-512]
+          provisions: topic
+          delivery: [at-most-once, at-least-once]
+    - name: subscribe
+      description: Consumers pull records from a topic provisioned by an ingest Glove (selected in Glove config).
+      direction: output
+      initiation: pull
+      bindings:
+        - protocol: kafka/3
+          formats: [json, avro, bytes]
+          auth: [none, scram-sha-512]
+          delivery: [at-most-once, at-least-once]
+  deployer:
+    kind: kubernetes
+    kubernetes:
+      primary: Kafka/${instance.name}
+      templates:
+        - apiVersion: kafka.strimzi.io/v1beta2
+          kind: Kafka
+          metadata: { name: "${instance.name}" }
+          spec: { kafka: { listeners: [{ name: plain, port: 9092, type: internal, tls: false }] } }
+  readiness:
+    strategy: cel
+    rule: "object.status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')"
+    timeout: 15m
+  outputs:
+    bootstrap: "${instance.name}-kafka-bootstrap.${env.namespace}.svc:9092"
+  lifecycle:
+    update: in-place
+    delete: supported
+    rollback: unsupported
+    stateful: true

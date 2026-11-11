@@ -1,0 +1,254 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.thanos.invalid/package/v1alpha1.json",
+  "title": "Thanos Technology / Adapter Package (v1alpha1)",
+  "description": "Machine-readable declaration of a technology or adapter: identity, config schema, ports (capabilities), deployer, readiness and lifecycle. See docs/thanos/05-glove-interoperability-model.md and 06-deployer-plugin-contract.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": { "const": "thanos/v1alpha1" },
+    "kind": { "enum": ["TechnologyPackage", "AdapterPackage"] },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["catalog", "name", "version"],
+      "properties": {
+        "catalog": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+        "name": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+        "version": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$"
+        },
+        "displayName": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "enum": ["service", "database", "messaging", "storage", "processing", "external", "adapter"] },
+        "illustrative": {
+          "type": "boolean",
+          "description": "True when the declaration is a planning example, not a verified product guarantee."
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["configSchema", "deployer", "lifecycle"],
+      "properties": {
+        "requires": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "thanosAgent": { "type": "string", "description": "semver range of agent versions" },
+            "kubernetes": { "type": "string", "description": "semver range, e.g. >=1.29" },
+            "openshift": { "type": "string" },
+            "crds": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["group", "kind", "version"],
+                "properties": {
+                  "group": { "type": "string" },
+                  "kind": { "type": "string" },
+                  "version": { "type": "string" }
+                }
+              }
+            },
+            "operator": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["packageName", "installPolicy"],
+              "properties": {
+                "packageName": { "type": "string", "description": "OLM package name" },
+                "channel": { "type": "string" },
+                "installPolicy": {
+                  "enum": ["UserManaged", "ThanosManaged"],
+                  "description": "UserManaged (MVP default): Thanos only verifies the operator's CRDs exist."
+                }
+              }
+            }
+          }
+        },
+        "configSchema": {
+          "type": "object",
+          "description": "JSON Schema 2020-12 for the technology's `config` block. Fields marked x-thanos-secret must be secretRefs."
+        },
+        "validations": {
+          "type": "array",
+          "description": "CEL rules over `config` beyond what JSON Schema expresses.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["rule", "message"],
+            "properties": {
+              "rule": { "type": "string" },
+              "message": { "type": "string" },
+              "path": { "type": "string" }
+            }
+          }
+        },
+        "ports": { "type": "array", "items": { "$ref": "#/$defs/port" } },
+        "dynamicPorts": {
+          "type": "object",
+          "description": "Ports defined by the user in config (e.g. a generic container). Each entry at configPath must match #/$defs/port.",
+          "additionalProperties": false,
+          "required": ["configPath"],
+          "properties": { "configPath": { "type": "string" } }
+        },
+        "adapter": {
+          "type": "object",
+          "description": "Only for AdapterPackage: which input port feeds which output port.",
+          "additionalProperties": false,
+          "required": ["inputPort", "outputPort"],
+          "properties": {
+            "inputPort": { "type": "string" },
+            "outputPort": { "type": "string" },
+            "costRank": { "type": "integer", "minimum": 1, "maximum": 100 }
+          }
+        },
+        "deployer": { "$ref": "#/$defs/deployer" },
+        "readiness": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "strategy": { "enum": ["kstatus", "cel", "deployer"] },
+            "rule": { "type": "string", "description": "CEL over the primary object when strategy=cel" },
+            "timeout": { "type": "string", "pattern": "^[0-9]+(s|m|h)$" }
+          }
+        },
+        "outputs": {
+          "type": "object",
+          "description": "Named connection values exported to Gloves. Values are ${CEL} templates evaluated in the user cluster; secret values are never exported, only Secret names.",
+          "additionalProperties": { "type": "string" }
+        },
+        "lifecycle": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["update", "delete", "rollback", "stateful"],
+          "properties": {
+            "update": { "enum": ["in-place", "replace", "unsupported"] },
+            "delete": { "enum": ["supported", "unsupported"] },
+            "rollback": {
+              "enum": ["reapply-previous", "unsupported"],
+              "description": "reapply-previous: re-deploying an older project version is expected to work. Data is never rolled back."
+            },
+            "stateful": { "type": "boolean", "description": "Stateful packages default to deletionPolicy Retain." }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "required": ["adapter"] },
+          "then": { "required": ["ports"] }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "AdapterPackage" } } },
+      "then": { "properties": { "spec": { "required": ["adapter", "ports"] } } }
+    }
+  ],
+  "$defs": {
+    "port": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "direction", "initiation", "bindings"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,30}$" },
+        "description": { "type": "string" },
+        "direction": {
+          "enum": ["output", "input"],
+          "description": "output = data leaves this technology; input = data enters it."
+        },
+        "initiation": {
+          "enum": ["pull", "push"],
+          "description": "Who initiates transfer. output+pull: 'Output B' (provider, readable). input+pull: 'Input A' (consumer reads). output+push: 'Output A' (emitter). input+push: 'Input B' (receiver)."
+        },
+        "maxConnections": { "type": "integer", "minimum": 1 },
+        "bindings": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/binding" }
+        },
+        "inject": {
+          "type": "object",
+          "description": "For consuming/emitting ports: how resolved connection values reach the workload. Keys are env var names; values are ${connection.*} templates or secretKeyRef markers.",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "formats", "auth"],
+      "properties": {
+        "protocol": {
+          "type": "string",
+          "description": "Controlled vocabulary id with major version, e.g. pgwire/3, kafka/3, http/1.1, http/2, s3/2006-03-01",
+          "pattern": "^[a-z0-9.-]+(/[0-9a-z.-]+)?$"
+        },
+        "formats": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "auth": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "brokered": {
+          "type": "boolean",
+          "description": "True when the binding needs a broker technology (via) between the endpoints, e.g. kafka/3 between two services."
+        },
+        "provisions": {
+          "type": "string",
+          "description": "Resource provisioned per Glove on the provider side, e.g. topic, bucket-prefix, database-role."
+        },
+        "delivery": {
+          "type": "array",
+          "items": { "enum": ["at-most-once", "at-least-once", "exactly-once"] }
+        },
+        "preference": { "type": "integer", "minimum": 0, "maximum": 100, "default": 50 }
+      }
+    },
+    "deployer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["kubernetes", "http"] },
+        "kubernetes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["templates"],
+          "properties": {
+            "templates": {
+              "type": "array",
+              "minItems": 1,
+              "description": "Kubernetes object templates. String values may contain ${CEL} expressions over {instance, config, connections, env}.",
+              "items": {
+                "type": "object",
+                "required": ["apiVersion", "kind", "metadata"],
+                "properties": {
+                  "apiVersion": { "type": "string" },
+                  "kind": { "type": "string" },
+                  "metadata": { "type": "object" }
+                }
+              }
+            },
+            "primary": { "type": "string", "description": "kind/name template of the object used for readiness and outputs" }
+          }
+        },
+        "http": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["image", "protocolVersion"],
+          "properties": {
+            "image": { "type": "string", "description": "Deployer service image (digest-pinned), run by the agent in the user's cluster." },
+            "protocolVersion": { "type": "string", "pattern": "^v[0-9]+$" },
+            "credentialsSecret": { "type": "string", "description": "Name of the user-created Secret mounted into the deployer pod." }
+          }
+        }
+      },
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "kubernetes" } } }, "then": { "required": ["kubernetes"] } },
+        { "if": { "properties": { "kind": { "const": "http" } } }, "then": { "required": ["http"] } }
+      ]
+    }
+  }
+}

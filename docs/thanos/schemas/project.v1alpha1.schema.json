@@ -1,0 +1,212 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.thanos.invalid/project/v1alpha1.json",
+  "title": "Thanos Project (v1alpha1)",
+  "description": "Desired-state description of a Thanos project. Public configuration API. See docs/thanos/07-project-yaml-specification.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": { "const": "thanos/v1alpha1" },
+    "kind": { "const": "Project" },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "$ref": "#/$defs/dnsLabel" },
+        "displayName": { "type": "string", "maxLength": 120 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "labels": {
+          "type": "object",
+          "maxProperties": 32,
+          "propertyNames": { "pattern": "^[a-z0-9]([a-z0-9.-]{0,61}[a-z0-9])?$" },
+          "additionalProperties": { "type": "string", "maxLength": 63 }
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["technologies"],
+      "properties": {
+        "technologies": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 200,
+          "items": { "$ref": "#/$defs/technology" }
+        },
+        "gloves": {
+          "type": "array",
+          "maxItems": 500,
+          "items": { "$ref": "#/$defs/glove" }
+        },
+        "environments": {
+          "type": "array",
+          "maxItems": 20,
+          "items": { "$ref": "#/$defs/environmentBinding" }
+        }
+      }
+    },
+    "layout": {
+      "description": "Non-semantic editor state (node positions). Ignored by validation, planning and deployment.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "nodes": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["x", "y"],
+            "properties": { "x": { "type": "number" }, "y": { "type": "number" } }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "dnsLabel": {
+      "type": "string",
+      "pattern": "^[a-z]([a-z0-9-]{0,38}[a-z0-9])?$",
+      "description": "Lowercase RFC 1123 label, max 40 chars (leaves room for generated Kubernetes name suffixes)."
+    },
+    "packageRef": {
+      "type": "string",
+      "description": "<catalog>/<package>@<semver range>, e.g. core/postgresql@^1.2",
+      "pattern": "^[a-z0-9-]+/[a-z0-9-]+@[~^]?[0-9]+(\\.[0-9]+){0,2}$"
+    },
+    "secretRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["secretRef"],
+      "properties": {
+        "secretRef": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "key"],
+          "properties": {
+            "name": { "type": "string", "pattern": "^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$" },
+            "key": { "type": "string", "pattern": "^[-._a-zA-Z0-9]+$", "maxLength": 253 }
+          }
+        }
+      }
+    },
+    "technology": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "package"],
+      "properties": {
+        "id": { "$ref": "#/$defs/dnsLabel" },
+        "displayName": { "type": "string", "maxLength": 120 },
+        "package": { "$ref": "#/$defs/packageRef" },
+        "config": {
+          "type": "object",
+          "description": "Validated against the package's own configSchema (semantic validation stage). Secret values are not allowed; use {secretRef: {name, key}}."
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "profile": { "enum": ["small", "medium", "large"] },
+            "cpu": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?m?$" },
+            "memory": { "type": "string", "pattern": "^[0-9]+(Mi|Gi)$" },
+            "storage": { "type": "string", "pattern": "^[0-9]+(Mi|Gi|Ti)$" }
+          }
+        },
+        "dependsOn": {
+          "type": "array",
+          "description": "Extra ordering edges beyond those implied by Gloves.",
+          "items": { "$ref": "#/$defs/dnsLabel" },
+          "uniqueItems": true
+        },
+        "deletionPolicy": {
+          "enum": ["Retain", "Delete"],
+          "description": "Default is taken from the package; stateful packages default to Retain."
+        },
+        "health": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "readinessTimeout": { "$ref": "#/$defs/duration" },
+            "required": { "type": "boolean", "default": true }
+          }
+        }
+      }
+    },
+    "portEndpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["technology", "port"],
+      "properties": {
+        "technology": { "$ref": "#/$defs/dnsLabel" },
+        "port": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,30}$" }
+      }
+    },
+    "glove": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "from", "to"],
+      "properties": {
+        "id": { "$ref": "#/$defs/dnsLabel" },
+        "from": {
+          "$ref": "#/$defs/portEndpoint",
+          "description": "The side that produces/provides data (an output port)."
+        },
+        "to": {
+          "$ref": "#/$defs/portEndpoint",
+          "description": "The side that consumes/receives data (an input port)."
+        },
+        "binding": {
+          "description": "'auto' lets the resolver choose. An object pins choices; pinned values are validated, never silently replaced.",
+          "oneOf": [
+            { "const": "auto" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "minProperties": 1,
+              "properties": {
+                "protocol": { "type": "string", "pattern": "^[a-z0-9.-]+(/[0-9]+)?$" },
+                "format": { "type": "string" },
+                "via": {
+                  "$ref": "#/$defs/dnsLabel",
+                  "description": "Broker technology id for brokered push (e.g. a Kafka instance)."
+                },
+                "adapter": { "$ref": "#/$defs/packageRef" }
+              }
+            }
+          ]
+        },
+        "config": {
+          "type": "object",
+          "description": "Binding/adapter-specific settings, validated against the selected binding or adapter schema."
+        },
+        "delivery": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "guarantee": { "enum": ["at-most-once", "at-least-once"] },
+            "deadLetter": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "environmentBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/dnsLabel",
+          "description": "Name of an Environment registered in the control plane (cluster + namespace + policies)."
+        },
+        "overrides": {
+          "type": "object",
+          "description": "Per-technology JSON Merge Patch (RFC 7386) applied to technology config for this environment.",
+          "propertyNames": { "$ref": "#/$defs/dnsLabel" },
+          "additionalProperties": { "type": "object" }
+        }
+      }
+    },
+    "duration": { "type": "string", "pattern": "^[0-9]+(s|m|h)$" }
+  }
+}

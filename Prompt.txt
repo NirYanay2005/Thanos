@@ -1,0 +1,963 @@
+# Thanos — Product Strategy, Software Architecture, Pitch Deck & AI-Assisted Development Roadmap
+
+## 1. Your role and mission
+
+Act as the founding CTO, principal software architect, platform engineer, product strategist, security architect, and technical project manager for a new software product called **Thanos** (working name).
+
+Your mission is to turn the product concept below into a coherent, technically defensible, implementation-ready product and engineering plan.
+
+The result must include:
+
+1. A detailed software architecture that a three-person development team can implement.
+2. A clearly defined product scope and MVP.
+3. A technical design for the extensible technology deployment system and universal connection abstraction called Gloves.
+4. A pitch presentation suitable for potential customers, technical partners, and early-stage investors.
+5. A realistic development roadmap for three people using AI coding agents.
+6. A practical implementation strategy, including milestones, technical risks, architectural decisions, validation experiments, and acceptance criteria.
+
+**Do not build the actual product yet.** This task is the architecture, product-definition, research, and planning phase. Create the documentation, diagrams, planning artifacts, and presentation files described below. Do not start implementing the production application until the architecture and plan are documented.
+
+Work autonomously. Make reasonable assumptions, document them, investigate critical uncertainties, and make recommendations. Do not stop to ask me questions when you can make a reasonable provisional decision. Clearly distinguish established facts, assumptions, recommendations, and unresolved decisions.
+
+The final result must be useful to real engineers, not just impressive-looking documentation.
+
+---
+
+# 2. Product vision
+
+Thanos is a **workflow-as-a-service platform for visually designing, configuring, connecting, and deploying a user's technology stack**.
+
+The fundamental idea is to let users construct an entire pipeline or service architecture using a visual interface.
+
+A user opens Thanos and sees a canvas. They can drag and drop technologies onto it, configure them, connect them using Gloves, validate the resulting architecture, and deploy the resulting project.
+
+The technologies might represent data sources, applications, APIs, messaging systems, databases, storage systems, processing engines, or custom services.
+
+The platform must not assume that every technology is implemented, installed, or deployed in the same way.
+
+Some technologies might be managed through external APIs. Others might be installed and managed by OpenShift Operators. Others might simply be containerized applications built from user-provided code.
+
+Thanos should give the user a unified experience despite these differences.
+
+The long-term vision is for Thanos to become a technology-composition platform in which users can assemble working systems from reusable components without having to manually understand and implement every integration and deployment detail.
+
+However, do not confuse the long-term vision with the first release. Recommend a realistic MVP that can prove the core architecture with a small development team.
+
+## 2.1 Core user experience
+
+The intended workflow is:
+
+1. A user creates a project.
+2. The user selects a target environment and supplies or configures the infrastructure resources that Thanos may use.
+3. The user drags technologies onto a visual canvas.
+4. The user configures each technology.
+5. The user connects technologies using Gloves.
+6. Thanos evaluates whether the connections are valid and identifies missing configuration or unsupported capabilities.
+7. The user reviews the deployment plan.
+8. The user deploys the project.
+9. Thanos tracks deployment progress, health, configuration, and operational status.
+10. The user can modify the design, validate changes, redeploy, inspect failures, and roll back where supported.
+
+The interface should represent both the logical architecture and the relevant deployment state.
+
+Recommend a frontend architecture and graph-editing approach appropriate for this product. Consider graph validation, large graphs, saved configurations, versioning, undo/redo, reusable templates, visual status, and a useful distinction between design time and runtime.
+
+Do not spend disproportionate effort specifying colors, icons, or superficial styling. Prioritize the product interactions and underlying system behavior.
+
+---
+
+# 3. Technology deployment model
+
+A technology in Thanos is not necessarily a single Docker container or Kubernetes resource.
+
+A technology is a logical component with configuration, declared capabilities, lifecycle behavior, connection capabilities, and a deployment strategy.
+
+The platform must support at least the following deployment models.
+
+## 3.1 External-service deployer
+
+Some technologies are external services that Thanos does not directly deploy.
+
+They expose an API through which Thanos can configure, provision, or otherwise interact with them.
+
+These services may expose different APIs, authentication mechanisms, configuration models, and lifecycle operations.
+
+Design a standardized integration contract that lets the Thanos core interact with such deployers without needing technology-specific logic in the core backend.
+
+Investigate how to support:
+
+* Dynamic API descriptions or discoverable capabilities.
+* Versioned API contracts.
+* Authentication and authorization.
+* Provisioning and configuration.
+* Resource discovery.
+* Health checks and status reporting.
+* Retries, timeouts, rate limits, and error handling.
+* Reconciliation of desired and actual state.
+* Compatibility checking.
+* Deployer registration, updates, and removal.
+
+Do not assume every external API can be fully discovered or controlled automatically. Define what a deployer must declare explicitly.
+
+## 3.2 OpenShift Operator deployer
+
+Some technologies will be installed and managed through an OpenShift Operator or other Kubernetes-native controller.
+
+Thanos should be able to describe the desired technology configuration and coordinate deployment through the appropriate Kubernetes APIs and operator-managed custom resources.
+
+Investigate:
+
+* How the required Operator is discovered, installed, or referenced.
+* Whether installation belongs to Thanos or remains the user's responsibility.
+* OpenShift version and capability compatibility.
+* Operator and Custom Resource Definition dependencies.
+* Namespace, RBAC, service account, and resource requirements.
+* Creation and reconciliation of custom resources.
+* Reporting readiness, failures, and runtime status.
+* Upgrades, deletion, and rollback limitations.
+* How Thanos operates without cluster-admin privileges where possible.
+
+Do not assume that arbitrary Operators have identical installation and lifecycle semantics.
+
+## 3.3 User-provided code or service deployer
+
+Users may want to introduce their own applications and services.
+
+Consider deployment from a container image, an existing service, or a build artifact generated from source code.
+
+Recommend which of these should be in the MVP.
+
+Investigate build and deployment responsibilities, image registries, build isolation, configuration, secrets, health checks, networking, resource limits, and deployment rollback.
+
+Never design a system that executes arbitrary user-supplied code inside the trusted Thanos control plane.
+
+## 3.4 A unified deployer abstraction
+
+Design a common deployment interface that can accommodate all three deployment models while preserving their specific differences.
+
+At a minimum, define the expected contracts for:
+
+* Technology metadata and identity.
+* Configuration schema and validation.
+* Capability discovery.
+* Deployment planning.
+* Deployment and updates.
+* Status and health reporting.
+* Deletion.
+* Version compatibility.
+* Error reporting.
+* Authentication and secret references.
+
+Determine whether these capabilities should be expressed through a plugin SDK, a remote HTTP API, an installed in-cluster agent, an operator integration, or a combination.
+
+Do not force every integration into one implementation mechanism merely for the sake of uniformity.
+
+Compare at least two viable designs and recommend one.
+
+For each option, document the developer experience, trust boundaries, failure modes, versioning, operational complexity, and long-term extensibility.
+
+The core platform must remain relatively stable as new deployers and technologies are introduced.
+
+---
+
+# 4. Gloves — the universal connection abstraction
+
+Gloves are one of the most important parts of the product.
+
+A Glove connects the input/output capabilities of technologies and establishes the mechanism through which they exchange information.
+
+The goal is to make technologies composable without hardcoding every technology pair into the Thanos platform.
+
+A Glove is not merely a visual line on a graph. It represents a configured and deployable integration with defined behavior, compatibility requirements, and operational properties.
+
+## 4.1 The four Glove modes
+
+The initial concept includes four modes.
+
+### Input A — Pull-based input with an automatically selected driver or dialect
+
+A technology pulls information from another technology.
+
+Thanos should automatically select a suitable driver, connector, or dialect based on the capabilities and requirements of the technologies involved.
+
+The selection should be based on explicit compatibility metadata rather than technology names or undocumented assumptions.
+
+### Input B — Push-based input with a user-selected transport
+
+A technology receives information pushed into it.
+
+The user selects an available input mechanism, initially considering:
+
+* HTTP/2.
+* Kafka.
+* Kafka-to-S3 or another clearly defined Kafka/S3 integration pattern.
+
+Validate the exact semantics of each proposed option. In particular, distinguish a transport protocol from a connector, a sink, or a storage destination.
+
+### Output A — Push-based output with a user-selected transport
+
+A technology pushes information out using a transport or integration mechanism selected by the user.
+
+The same initial candidates may apply, subject to the source and destination capabilities.
+
+### Output B — Output with an automatically selected driver or dialect
+
+A technology exposes output that can be consumed by a compatible technology through an automatically selected driver, connector, or dialect.
+
+Clarify precisely how this mode differs from Output A and from Input A. The names and initial descriptions are not yet a complete formal model, so resolve any semantic overlap.
+
+## 4.2 Universal interoperability goal
+
+The long-term goal is for any compatible technology to communicate with any other compatible technology through a Glove.
+
+Do not simply claim that every pair is automatically compatible.
+
+Different technologies may use incompatible protocols, data formats, schemas, authentication mechanisms, communication patterns, or delivery semantics.
+
+Design a capability-driven compatibility system that makes this ambition technically achievable.
+
+Investigate the following approaches:
+
+* Direct native connectors.
+* Standardized protocols.
+* Reusable protocol adapters.
+* Intermediate gateways or bridges.
+* Data-format and schema conversion.
+* Generated connectors.
+* User-provided adapters.
+* Explicitly declared compatibility matrices.
+
+Explain which approach belongs in the MVP and how the design can evolve toward broader interoperability.
+
+## 4.3 Formal Glove model
+
+Define the complete Glove data model and lifecycle.
+
+Address:
+
+* Source and destination identity.
+* Directionality.
+* Input and output capabilities.
+* Transport selection.
+* Automatically selected connector or driver.
+* Adapter requirements.
+* Data types, schemas, and serialization.
+* Schema evolution and compatibility.
+* Authentication and secret references.
+* Network configuration and connectivity.
+* Delivery guarantees and ordering.
+* Retries, timeouts, and idempotency.
+* Backpressure and buffering.
+* Error handling and dead-letter handling where applicable.
+* Resource requirements.
+* Connection health and observability.
+* Version compatibility.
+* Creation, validation, deployment, modification, and deletion.
+* Unsupported connection combinations and actionable explanations.
+
+Determine whether a Glove should be implemented through configuration alone, a generated deployment artifact, a runtime adapter, an intermediate service, or a combination.
+
+Clearly distinguish the **logical connection model** from the **actual runtime data path**.
+
+A connection that requires no new runtime component must not be implemented in the same way as one that requires a protocol bridge or transformation service unless there is a good reason.
+
+## 4.4 Glove capability registry
+
+Design a way for technologies and adapters to declare capabilities in a machine-readable format.
+
+A capability declaration might describe:
+
+* Supported input and output modes.
+* Supported transports and protocols.
+* Supported data formats and schemas.
+* Supported operations.
+* Authentication methods.
+* Pull versus push behavior.
+* Compatibility constraints.
+* Version and resource requirements.
+* Required configuration.
+* Optional features and limitations.
+
+Recommend a schema format, validation approach, and versioning policy.
+
+Explain how the UI can use capability metadata to guide users toward valid connections, without relying on hardcoded UI rules for each technology.
+
+Provide sample capability declarations for at least three illustrative technologies and two adapter types. Label any illustrative technology behavior as an assumption rather than a real product guarantee.
+
+## 4.5 Glove architecture questions
+
+Answer explicitly:
+
+1. Where does a Glove execute?
+2. Which responsibilities belong to the Thanos control plane versus the user's cluster?
+3. Can two technologies communicate directly without a Thanos-managed runtime component?
+4. When should a protocol bridge be deployed?
+5. Where should schema transformation occur?
+6. How are compatibility decisions calculated?
+7. How are user overrides reconciled with automatic selection?
+8. How does the system avoid requiring a bespoke integration for every possible technology pair?
+9. How does Thanos report the difference between a configured connection, a deployed connection, and a healthy data path?
+10. How does the design accommodate future streaming and batch-processing components?
+
+Provide an architecture diagram and a complete connection lifecycle.
+
+---
+
+# 5. Project configuration and deployment
+
+A user's project should be represented declaratively using YAML.
+
+The YAML describes the intended logical architecture, technology configurations, Gloves, deployment targets, and necessary dependencies.
+
+It should reference secrets and credentials without storing their plaintext values.
+
+The backend uses Argo Workflows as a proposed orchestration mechanism for deploying projects.
+
+Treat that as an initial requirement to evaluate, not as a conclusion that every deployment responsibility must be implemented as a Workflow.
+
+## 5.1 Design the project YAML
+
+Define a versioned YAML specification.
+
+It should be possible to represent:
+
+* Project identity and version.
+* Technologies and their configurations.
+* Technology/deployer references.
+* Glove connections.
+* Adapter selection or selection policies.
+* Deployment target references.
+* Resource requirements and constraints.
+* Dependency ordering and readiness requirements.
+* Configuration and secret references.
+* Health-check expectations.
+* Version compatibility constraints.
+
+Provide a realistic end-to-end example YAML project containing several technologies connected through Gloves.
+
+Include at least one illustrative external-service technology, one Operator-managed technology, and one application/service deployment where practical.
+
+Demonstrate how the configuration represents desired state without embedding implementation-specific instructions throughout the project definition.
+
+Include:
+
+* JSON Schema or an equivalent formal validation mechanism.
+* YAML schema versioning.
+* Validation rules and user-facing diagnostics.
+* Migration rules for schema evolution.
+* Import/export behavior.
+* Deterministic serialization where useful.
+* A validation strategy for invalid, unsupported, or insecure configurations.
+
+Explain which parts should be part of the public configuration API and which should remain internal implementation details.
+
+## 5.2 Deployment lifecycle
+
+Design the full deployment process:
+
+1. User saves the project.
+2. YAML is generated or updated.
+3. Structural validation runs.
+4. Semantic validation checks capabilities and compatibility.
+5. Credentials and deployment target access are verified.
+6. A deployment plan or diff is generated.
+7. The user reviews the plan where necessary.
+8. Argo Workflows or another recommended mechanism executes deployment tasks.
+9. Technologies are provisioned in dependency order.
+10. Gloves and required adapters are deployed or configured.
+11. Readiness and health are verified.
+12. The deployment result is recorded.
+13. The user can inspect logs, diagnostics, and current state.
+14. Subsequent changes are planned and applied.
+15. Failures, partial deployments, retries, and rollback are handled explicitly.
+
+Define idempotency, concurrent deployment protection, cancellation, timeouts, cleanup, recovery after backend restarts, and deployment audit history.
+
+## 5.3 Evaluate Argo Workflows versus other mechanisms
+
+Research the current official documentation and relevant technical constraints.
+
+Compare Argo Workflows with appropriate alternatives or complementary mechanisms, including Argo CD and Kubernetes-native controllers where relevant.
+
+Answer:
+
+* What should orchestrate a deployment?
+* What should continuously reconcile long-lived desired state?
+* Who detects and corrects configuration drift?
+* What happens after a Workflow finishes?
+* How are failures and partial deployments recovered?
+* How are workflow templates versioned?
+* How are credentials passed safely?
+* Which operations require direct cluster access?
+* How does the platform behave across multiple user clusters?
+
+Recommend a division of responsibility rather than choosing technology based on familiarity.
+
+Do not introduce Argo CD, operators, or extra controllers simply because they are available. Justify every additional architectural component.
+
+---
+
+# 6. Infrastructure ownership and trust boundaries
+
+The resources and OpenShift clusters on which technologies are deployed are provided or controlled by the user.
+
+Treat this as a foundational architectural constraint.
+
+Define the distinction between:
+
+**Thanos control plane:** The UI, API, project definitions, catalog, capability registry, deployment planning, orchestration, and management metadata.
+
+**User execution environment:** The user's OpenShift/Kubernetes infrastructure, deployed technologies, runtime adapters, and the resources consumed by the pipeline.
+
+Determine whether additional components should run inside the user's cluster.
+
+Evaluate the tradeoffs of a central control plane, a per-cluster agent, direct API access, and an outbound-only cluster connection.
+
+Explain how the architecture works when clusters are behind firewalls, cannot accept inbound connections, or have restricted outbound access.
+
+Address:
+
+* Multi-tenancy.
+* Authentication and authorization.
+* Project-level and environment-level permissions.
+* Cluster registration.
+* Least-privilege service accounts.
+* Credential rotation and revocation.
+* Secret storage and delivery.
+* TLS and service-to-service authentication.
+* Audit logs.
+* Network isolation.
+* Deployer isolation and trust.
+* Supply-chain and artifact security.
+* Resource quotas.
+* Untrusted YAML and configuration.
+* SSRF and abuse of user-configured external endpoints.
+* Prevention of arbitrary code execution in the control plane.
+* Secure deletion and lifecycle cleanup.
+* Backup and recovery.
+
+Specify what Thanos must be able to access, what remains under the user's control, and what information Thanos must never require to leave the user's environment.
+
+Differentiate requirements for a local development environment, the MVP, and a production deployment.
+
+---
+
+# 7. Future processing capabilities
+
+The future product may introduce built-in data-processing capabilities through Apache NiFi, Apache Flink, or another suitable technology.
+
+Potential use cases include batching, streaming, transformations, enrichment, routing, buffering, and data processing between technologies.
+
+Do not make full built-in processing a requirement for the initial MVP unless the research shows that it is essential to validate the product.
+
+Instead, determine how the architecture should support future processing components without a major redesign.
+
+Compare NiFi, Flink, and other reasonable alternatives against the relevant workload types.
+
+Identify which capabilities overlap and which are fundamentally different.
+
+Design an extensibility approach in which processing engines can participate as technologies, deployers, and/or runtime components with their own resource and lifecycle requirements.
+
+Consider whether a separate processing abstraction is justified or whether existing technology and Glove contracts are sufficient.
+
+Explain what should be designed now, what should be explicitly deferred, and which premature abstractions should be avoided.
+
+---
+
+# 8. Product scope, users, and differentiation
+
+Before finalizing the architecture, define the product precisely.
+
+Identify:
+
+* The most likely initial customer profile.
+* The primary user and their job to be done.
+* The painful workflow that the product improves.
+* Why users would use Thanos instead of manually deploying and wiring components.
+* The smallest product capable of demonstrating meaningful value.
+* The most important competitive alternatives.
+* Existing open-source and commercial tools that overlap with the proposed capabilities.
+* What makes Thanos meaningfully different.
+* The strongest risks to adoption.
+
+Research the current technology and product landscape rather than assuming no competing solution exists.
+
+Investigate visual workflow builders, integration platforms, internal developer platforms, deployment orchestrators, data pipeline tools, and relevant Kubernetes ecosystem projects.
+
+Include a practical product-name and branding risk review. Thanos is a working name, not an assumption that the name is available for commercial use.
+
+Do not claim that the product has no competitors or that its name is legally available without adequate evidence.
+
+Recommend a narrow initial use case if a general-purpose platform would be too broad for three developers to deliver and validate.
+
+---
+
+# 9. Technical research requirements
+
+Use current official documentation wherever possible, supplemented by reputable engineering references and actual implementation evidence when necessary.
+
+Prioritize official sources for:
+
+* Argo Workflows.
+* Argo CD.
+* OpenShift and Kubernetes.
+* OpenShift Operators and their APIs.
+* Relevant protocol specifications.
+* Candidate connector and processing technologies.
+* Relevant security and schema standards.
+
+Use source research to validate important architecture decisions, not merely to collect links.
+
+For each major decision, explain:
+
+1. The problem being solved.
+2. The viable options.
+3. The relevant evidence.
+4. The tradeoffs.
+5. The recommendation.
+6. The assumptions and risks.
+7. What evidence would cause the decision to change.
+
+Provide links to the sources you actually consulted. Do not invent citations, product features, benchmarks, or compatibility claims.
+
+Clearly distinguish a proven technology capability from a proposed Thanos feature.
+
+---
+
+# 10. Required architecture deliverables
+
+Create a detailed architecture package.
+
+## 10.1 Executive architecture summary
+
+Explain the system in plain language, followed by its most important architectural decisions.
+
+Include the chosen architectural style and why it suits a three-person team.
+
+Evaluate a modular monolith, a service-oriented design, and a selectively distributed architecture. Avoid defaulting to microservices.
+
+If a modular monolith is appropriate for the initial control plane, explain how to preserve clean boundaries and identify the components that may need separate deployment or scaling.
+
+## 10.2 System context and component diagrams
+
+Create Mermaid diagrams covering:
+
+* System context and external actors.
+* Logical application architecture.
+* Backend modules and their responsibilities.
+* Deployment control plane and user execution environment.
+* Deployer integration architecture.
+* Glove capability resolution.
+* Glove runtime data paths.
+* End-to-end deployment sequence.
+* Failure handling and reconciliation.
+
+Every diagram should explain a meaningful architectural decision. Avoid diagrams that are merely decorative.
+
+## 10.3 Domain model
+
+Define the key entities, relationships, invariants, and lifecycle states.
+
+Consider at least:
+
+* User and tenant.
+* Project and project version.
+* Technology definition and technology instance.
+* Deployer and deployer version.
+* Capability and adapter.
+* Glove and connection configuration.
+* Deployment target.
+* Environment.
+* Deployment plan and deployment execution.
+* Resource allocation.
+* Secret reference.
+* Processing component.
+* Health/status information.
+* Audit event.
+
+Do not force every item into a database entity. Distinguish persistent domain objects, runtime objects, external resources, and derived information.
+
+## 10.4 Database and storage architecture
+
+Recommend a storage strategy based on actual access patterns and consistency requirements.
+
+Evaluate the need for relational storage, object storage, caching, search, or specialized databases.
+
+Consider project version history, YAML documents, deployment execution records, workflow logs, and potentially large runtime metadata.
+
+Prefer the smallest sensible storage architecture that satisfies the requirements.
+
+Do not introduce multiple databases without demonstrating a meaningful need.
+
+Provide a data ownership model, backup strategy, migration strategy, and data retention considerations.
+
+## 10.5 API and integration contracts
+
+Define the main public API resources and internal service contracts.
+
+Include representative endpoint examples or OpenAPI-oriented specifications for:
+
+* Projects and project versions.
+* Technology catalog.
+* Technology instances.
+* Deployer registration and capability discovery.
+* Glove configuration and compatibility validation.
+* Deployment planning.
+* Deployment execution and status.
+* Target clusters and environments.
+* Logs and health information.
+
+Provide example request and response payloads.
+
+Describe API authentication, authorization, pagination where relevant, error contracts, idempotency, and versioning.
+
+Do not over-specify endpoints whose domain model has not been established.
+
+## 10.6 Deployer SDK and extension contract
+
+Propose an implementable contract for authors of external deployers.
+
+Provide an illustrative example of an external HTTP-based deployer and an illustrative Operator integration.
+
+Where feasible, show how an author could add a new technology without modifying the core platform.
+
+Explain how deployers declare their requirements, configuration schema, supported lifecycle operations, and connection capabilities.
+
+## 10.7 Technology stack recommendation
+
+Recommend a coherent stack for the frontend, backend, API contracts, persistent storage, graph editor, project validation, deployment orchestration, observability, tests, and local development.
+
+Evaluate the existing ecosystem and current support before selecting specific libraries or versions.
+
+Prefer mature technologies, clear interfaces, reliable tooling, and approaches the team can maintain.
+
+Avoid adding a technology merely because it is popular.
+
+If the repository or existing project already establishes a stack, respect it unless there is a concrete reason to recommend a change.
+
+## 10.8 Architecture decision records
+
+Create concise ADRs for the most important decisions.
+
+Include at least:
+
+* Overall architecture style.
+* Frontend graph representation.
+* Project YAML model.
+* Deployer/plugin interface.
+* Glove abstraction and runtime execution.
+* Capability discovery and compatibility matching.
+* Deployment orchestration.
+* Desired-state reconciliation.
+* Storage architecture.
+* User cluster connectivity.
+* Secret management.
+* MVP processing scope.
+
+Use the standard format: context, options, decision, consequences, and conditions for reconsideration.
+
+Do not label an assumption as a finalized decision without explaining its status.
+
+---
+
+# 11. MVP and validation strategy
+
+Define an MVP that is genuinely useful but feasible for three developers assisted by AI.
+
+The MVP should prove the following product hypothesis:
+
+A user can visually define a small technology pipeline, connect compatible components with Gloves, deploy it into user-controlled infrastructure, and see whether it is working.
+
+Recommend the smallest realistic set of technologies and deployer types needed to prove this.
+
+A reasonable candidate set might contain a simple user service, a database or other stateful component, a messaging component, and an integration bridge. Treat this as a starting hypothesis, not a mandatory stack.
+
+Identify which combinations prove the architecture and which are redundant.
+
+Do not claim universal interoperability is complete merely because two technologies can exchange data.
+
+Define measurable acceptance criteria for:
+
+* Project creation and persistence.
+* Visual graph editing.
+* YAML generation and validation.
+* Capability discovery.
+* Compatibility validation.
+* Deployment planning.
+* Successful deployment.
+* Health and status visibility.
+* Failure recovery.
+* Security.
+* Documentation and onboarding.
+
+Include integration, contract, end-to-end, failure-injection, and security testing.
+
+Recommend local test infrastructure and CI workflows suitable for an AI-assisted team.
+
+Identify the highest-risk assumptions and design short proof-of-concept experiments to test them before extensive implementation.
+
+---
+
+# 12. Pitch presentation
+
+Create a professional pitch deck for Thanos.
+
+Assume the primary audience includes technically sophisticated potential customers, early design partners, technical collaborators, and early-stage investors.
+
+The presentation must explain the product clearly to someone who has never heard of it.
+
+Use 10–12 slides, or another justified length if necessary.
+
+Recommended narrative:
+
+1. **Title:** Thanos — a visual platform for composing and deploying technology stacks.
+2. **Problem:** The complexity of integrating, configuring, and deploying heterogeneous technologies.
+3. **Current alternatives:** Why existing approaches leave a gap for the target customer.
+4. **Solution:** The Thanos visual workflow and composition model.
+5. **Product experience:** A user creates a project, connects technologies using Gloves, validates it, and deploys it.
+6. **Architecture:** The control plane, deployment environment, deployers, and Glove runtime.
+7. **Differentiation:** The extensible deployment model and capability-driven interoperability.
+8. **Initial market and use case:** A clearly justified customer profile and entry point.
+9. **Business model hypotheses:** Plausible ways the product might create and capture value, clearly labeled as hypotheses.
+10. **Roadmap:** MVP, validation, and subsequent expansion.
+11. **Risks and defensibility:** Hard technical problems, trust, adoption, and potential competitive advantages.
+12. **The ask:** A concrete next step, such as recruiting design partners or validating a pilot.
+
+Do not invent customer traction, revenue, market size, customer interviews, partnerships, or competitive superiority.
+
+Any market sizing must be research-based, sourced, and relevant to the proposed initial customer segment. If reliable sizing is unavailable, present that uncertainty transparently.
+
+Make the presentation visually clear, technically credible, and consistent in terminology.
+
+Include meaningful architecture illustrations, a simplified Glove diagram, and a representative user workflow.
+
+Generate an **editable PowerPoint (.pptx)** if the available tools support reliable presentation creation. Also include the presentation source in Markdown and any scripts required to regenerate the deck.
+
+If actual PowerPoint generation is not possible, produce a complete slide-by-slide presentation with speaker notes and precise visual directions instead. Do not claim that a PowerPoint file was created unless it exists and has been verified.
+
+---
+
+# 13. Three-person AI-assisted engineering roadmap
+
+Create a practical implementation roadmap for a team of three developers using AI coding agents.
+
+Treat AI as a force multiplier, not as three additional fully independent engineers. Account for review, debugging, architectural coordination, testing, and integration overhead.
+
+## 13.1 Team responsibilities
+
+Propose an initial division of responsibilities such as:
+
+* **Engineer A — Platform and backend:** Core domain, APIs, persistence, project model, and deployment control plane.
+* **Engineer B — Frontend and developer experience:** Graph editor, catalog UX, configuration editing, validation feedback, and project workflows.
+* **Engineer C — Infrastructure and integrations:** Cluster connectivity, deployer SDK, Glove adapters, orchestration, test environments, CI/CD, and operational tooling.
+
+Modify these responsibilities where doing so improves the architecture or reduces integration risk.
+
+Identify the parts that cannot be developed independently because they depend on shared interfaces.
+
+## 13.2 AI workflow
+
+Define how the team should use AI during development.
+
+Include:
+
+* Bounded tasks for coding agents.
+* Architectural context and project rules that every agent must receive.
+* Shared specifications and interface contracts.
+* Git branching and pull-request practices.
+* Parallelization boundaries.
+* Integration checkpoints.
+* Automated testing and review.
+* Human approval requirements for security-sensitive or irreversible operations.
+* Prevention of agents independently inventing incompatible domain models or APIs.
+* Documentation and decision-record updates.
+* A method for recording discovered issues and feeding them into future tasks.
+
+If subagents are available, use them for independent research and review tasks when appropriate. Assign explicit scopes, expected outputs, and integration responsibilities. Do not split the work into agents that all modify the same central architecture without coordination.
+
+## 13.3 Roadmap structure
+
+Break the plan into phases with dependencies, deliverables, owners, acceptance criteria, and estimated durations.
+
+Include:
+
+* Product validation and requirements.
+* Architecture validation and high-risk proof of concepts.
+* Development environment and repository foundations.
+* Core domain and YAML project model.
+* Visual graph editor.
+* Capability registry and compatibility validation.
+* First deployer implementation.
+* First real deployment into a user-controlled environment.
+* Glove runtime and interoperability.
+* Observability, security, and recovery.
+* MVP integration and end-to-end testing.
+* Pilot readiness and feedback.
+* Post-MVP processing and ecosystem expansion.
+
+For each phase, identify the critical path and tasks that can run in parallel.
+
+Provide a base-case schedule and explain the optimistic and conservative cases. State the assumptions behind all estimates. Do not create artificially precise estimates or promise that a complex integration can be completed in a fixed number of days.
+
+Include explicit milestones, go/no-go decisions, and conditions that should cause the team to reduce scope.
+
+## 13.4 Engineering execution artifacts
+
+Generate:
+
+* An initial epic breakdown.
+* A prioritized backlog.
+* A first set of implementable tasks.
+* Task dependencies and ownership.
+* Definition-of-ready and definition-of-done checklists.
+* A release checklist.
+* A risk register with severity, likelihood, mitigation, and owner.
+* A weekly engineering review template.
+* A lightweight architecture governance process.
+
+Prioritize the next task based on dependency, risk reduction, and value delivered, rather than on whichever task looks easiest to code.
+
+---
+
+# 14. Required repository outputs
+
+Inspect the existing repository before creating or modifying files.
+
+Respect existing project conventions, avoid overwriting unrelated material, and place the planning artifacts in a coherent documentation structure.
+
+Unless the repository already has a better convention, aim for an organization similar to:
+
+docs/thanos/
+
+* 00-executive-summary.md
+* 01-product-requirements.md
+* 02-mvp-scope-and-acceptance-criteria.md
+* 03-system-architecture.md
+* 04-domain-model-and-data-storage.md
+* 05-glove-interoperability-model.md
+* 06-deployer-plugin-contract.md
+* 07-project-yaml-specification.md
+* 08-api-and-integration-contracts.md
+* 09-security-and-trust-boundaries.md
+* 10-architecture-decision-records.md
+* 11-testing-and-validation-strategy.md
+* 12-risk-register-and-open-questions.md
+* 13-roadmap-for-three-person-team.md
+* 14-competitive-and-naming-assessment.md
+* references.md
+
+pitch/
+
+* thanos-pitch.md
+* thanos-pitch.pptx, if successfully generated
+* supporting source files or scripts if needed
+
+README.md or an equivalent index should explain the artifacts, the recommended implementation sequence, and which decisions remain open.
+
+Adjust these filenames and groupings if another structure better fits the repository.
+
+The documentation should be sufficiently detailed that another engineer or AI agent could begin implementing the MVP without needing to reverse-engineer the original conversations.
+
+Do not produce one enormous document that is difficult to navigate. Cross-reference related documents and keep a clear distinction between requirements, decisions, implementation plans, and future possibilities.
+
+---
+
+# 15. Quality standards and operating principles
+
+Follow these principles throughout the work:
+
+**SOLID:** Maintain clear responsibilities and explicit abstraction boundaries where they are useful.
+
+**Clean code:** Favor descriptive names, predictable behavior, explicit contracts, and maintainable designs.
+
+**KISS:** Prefer the simplest design that solves the demonstrated problem. Avoid speculative complexity.
+
+**YAGNI:** Do not implement future capabilities before they are needed. Preserve useful extension points without creating abstractions for imaginary requirements.
+
+**Separation of concerns:** Distinguish product/domain logic, UI behavior, deployment orchestration, deployer integrations, and runtime data processing.
+
+**Security by design:** Treat external deployers, user configurations, credentials, and cluster access as separate trust boundaries.
+
+**Declarative configuration:** Maintain a clear model of desired state, observed state, and the operations required to reconcile them.
+
+**AI-friendly architecture:** Establish stable interfaces, automated validation, repository instructions, and small independently testable tasks so coding agents can work efficiently.
+
+**Operational realism:** Document partial failure, observability, upgrades, rollback limitations, recovery, resource consumption, and ongoing maintenance.
+
+**Evidence-based decisions:** Research material uncertainties and cite sources. Never substitute confidence or polished diagrams for technical validation.
+
+Avoid both extremes: an oversimplified prototype that cannot grow into the product and an enterprise-scale distributed architecture that three engineers cannot maintain.
+
+Whenever you recommend a feature or component, identify the problem it solves and the minimum implementation required.
+
+---
+
+# 16. Execution procedure
+
+Execute this task in the following order.
+
+### Phase A — Discovery
+
+Inspect the repository, available tooling, existing project conventions, and any existing documentation. Identify missing product decisions and assumptions.
+
+### Phase B — Independent research and architecture exploration
+
+Research the most consequential topics independently where appropriate. Compare viable approaches and identify contradictions in the requirements, especially in the Glove model, deployer contract, and deployment lifecycle.
+
+### Phase C — Architecture synthesis
+
+Resolve the major decisions into a coherent architecture. Ensure that the proposed UI, domain model, YAML representation, deployers, Gloves, and orchestration system describe the same product.
+
+### Phase D — MVP and risk validation
+
+Reduce the concept to a practical first release. Identify the highest-risk assumptions and specify the smallest proof-of-concept experiments that could invalidate or confirm them.
+
+### Phase E — Documentation and pitch creation
+
+Write the architecture package, diagrams, contracts, decision records, risk register, roadmap, and presentation.
+
+### Phase F — Consistency review
+
+Review the deliverables as if you were conducting a design review before implementation.
+
+Check for contradictions, unsupported claims, missing interfaces, unexplained components, scope creep, and unrealistic milestones.
+
+Specifically verify that:
+
+* Every deployment model has a coherent lifecycle.
+* Every Glove has a defined logical representation and runtime behavior.
+* Automatic compatibility selection has explicit rules and failure behavior.
+* The YAML model agrees with the domain model and public API.
+* The orchestration design accounts for long-lived desired state and failure recovery.
+* Security boundaries are consistent across the architecture.
+* The roadmap covers dependencies and integration work.
+* The pitch accurately represents the proposed implementation.
+* Future processing capabilities are separated from MVP commitments.
+
+### Phase G — Final audit
+
+Verify that every promised file has actually been created and that every diagram is usable.
+
+If a PowerPoint file was generated, verify that it opens and that the slides have not been left empty or malformed.
+
+Report any incomplete deliverables honestly.
+
+---
+
+# 17. Final response format
+
+When finished, provide a concise but meaningful implementation-planning summary containing:
+
+1. The recommended overall architecture.
+2. The most important architectural decisions and their rationale.
+3. The recommended MVP scope.
+4. The hardest technical risks and how to validate them.
+5. The recommended division of work among the three developers.
+6. The estimated roadmap and its assumptions.
+7. The list of documents and presentation artifacts actually created.
+8. The unresolved decisions that require founder input.
+9. The first five actions the team should take before and during the beginning of implementation.
+
+Be willing to challenge the original concept when there is a strong technical or product reason to do so. Preserve the vision while making the first implementation realistic.
+
+The ultimate goal is not to produce the most sophisticated architecture document. It is to create a clear and actionable blueprint for building a credible first version of Thanos with three developers and AI-assisted engineering.

@@ -1,0 +1,66 @@
+# Adapter: Kafka topic -> S3 objects. This is a Kafka Connect *sink connector*, not a transport.
+# Connector choice: Aiven cloud-storage-connectors (Apache-2.0). Confluent's S3 sink is under the
+# Confluent Community License, so it is not bundled. Strimzi KafkaConnect build details are verified in PoC-3.
+apiVersion: thanos/v1alpha1
+kind: AdapterPackage
+metadata:
+  catalog: core
+  name: kafka-to-s3
+  version: 0.1.0
+  displayName: Kafka -> S3 sink (Kafka Connect)
+  category: adapter
+  illustrative: true
+spec:
+  requires:
+    crds:
+      - { group: kafka.strimzi.io, kind: KafkaConnect, version: v1beta2 }
+      - { group: kafka.strimzi.io, kind: KafkaConnector, version: v1beta2 }
+  adapter:
+    inputPort: in
+    outputPort: out
+    costRank: 40
+  configSchema:
+    type: object
+    additionalProperties: false
+    properties:
+      flushSize: { type: integer, minimum: 1, default: 1000 }
+      outputFormat: { enum: [json, parquet], default: json }
+  ports:
+    - name: in
+      direction: input
+      initiation: pull
+      bindings:
+        - { protocol: kafka/3, formats: [json, avro], auth: [none, scram-sha-512], delivery: [at-least-once] }
+    - name: out
+      direction: output
+      initiation: push
+      bindings:
+        - { protocol: s3/2006-03-01, formats: [json, parquet], auth: [aws-sigv4], delivery: [at-least-once] }
+  deployer:
+    kind: kubernetes
+    kubernetes:
+      primary: KafkaConnector/${instance.name}
+      templates:
+        # ponytail: one Connect cluster per adapter instance; share a Connect cluster per Kafka when >5 sinks.
+        - apiVersion: kafka.strimzi.io/v1beta2
+          kind: KafkaConnect
+          metadata: { name: "${instance.name}", annotations: { strimzi.io/use-connector-resources: "true" } }
+          spec: { replicas: 1, bootstrapServers: "${connections.in.bootstrap}" }
+        - apiVersion: kafka.strimzi.io/v1beta2
+          kind: KafkaConnector
+          metadata: { name: "${instance.name}", labels: { strimzi.io/cluster: "${instance.name}" } }
+          spec:
+            tasksMax: 1
+            config:
+              topics: "${connections.in.topic}"
+              errors.tolerance: "${glove.deadLetter ? 'all' : 'none'}"
+              errors.deadletterqueue.topic.name: "${glove.deadLetter ? connections.in.topic + '.dlq' : ''}"
+  readiness:
+    strategy: cel
+    rule: "object.status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')"
+    timeout: 10m
+  lifecycle:
+    update: in-place
+    delete: supported
+    rollback: reapply-previous
+    stateful: false

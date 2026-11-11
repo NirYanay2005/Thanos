@@ -1,0 +1,67 @@
+# PostgreSQL via the CloudNativePG operator. Operator installation is UserManaged in the MVP:
+# Thanos verifies the CRD exists and fails validation with an actionable message otherwise.
+# Illustrative: CNPG service/secret naming (<name>-rw, <name>-app) must be re-verified in PoC-2.
+apiVersion: thanos/v1alpha1
+kind: TechnologyPackage
+metadata:
+  catalog: core
+  name: postgresql
+  version: 1.2.0
+  displayName: PostgreSQL (CloudNativePG)
+  category: database
+  illustrative: true
+spec:
+  requires:
+    kubernetes: ">=1.29"
+    crds:
+      - { group: postgresql.cnpg.io, kind: Cluster, version: v1 }
+    operator:
+      packageName: cloudnative-pg
+      installPolicy: UserManaged
+  configSchema:
+    type: object
+    additionalProperties: false
+    required: [database]
+    properties:
+      instances: { type: integer, minimum: 1, maximum: 5, default: 1 }
+      database: { type: string, pattern: "^[a-z_][a-z0-9_]{0,62}$" }
+      storageSize: { type: string, default: 1Gi }
+      postgresVersion: { type: string, enum: ["16", "17"], default: "17" }
+  ports:
+    - name: sql
+      description: Read/write SQL endpoint. Request/response protocol, so the server is the 'from' side.
+      direction: output
+      initiation: pull
+      bindings:
+        - protocol: pgwire/3
+          formats: [sql]
+          auth: [password]
+          # MVP: consumers share the operator-generated app credentials (R0, config-only).
+          # Post-MVP: per-Glove database roles would add `provisions: database-role` (R1).
+          preference: 80
+  deployer:
+    kind: kubernetes
+    kubernetes:
+      primary: Cluster/${instance.name}
+      templates:
+        - apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          metadata: { name: "${instance.name}" }
+          spec:
+            instances: "${config.instances}"
+            storage: { size: "${config.storageSize}" }
+            bootstrap: { initdb: { database: "${config.database}", owner: app } }
+  readiness:
+    strategy: cel
+    rule: "object.status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')"
+    timeout: 10m
+  outputs:
+    host: "${instance.name}-rw.${env.namespace}.svc"
+    port: "5432"
+    database: "${config.database}"
+    credentialsSecret: "${instance.name}-app"
+  lifecycle:
+    update: in-place
+    delete: supported
+    rollback: unsupported
+    stateful: true

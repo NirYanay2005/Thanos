@@ -1,0 +1,56 @@
+# Adapter: HTTP push -> Kafka (protocol bridge), e.g. the Strimzi Kafka Bridge.
+# The bridge speaks HTTP/1.1 REST (assumption to verify), so a Glove pinned to http/2 is
+# reported as unsatisfiable through this adapter instead of silently downgraded.
+apiVersion: thanos/v1alpha1
+kind: AdapterPackage
+metadata:
+  catalog: core
+  name: http-to-kafka
+  version: 0.1.0
+  displayName: HTTP -> Kafka bridge
+  category: adapter
+  illustrative: true
+spec:
+  requires:
+    crds:
+      - { group: kafka.strimzi.io, kind: KafkaBridge, version: v1beta2 }
+  adapter:
+    inputPort: in
+    outputPort: out
+    costRank: 50
+  configSchema:
+    type: object
+    additionalProperties: false
+    properties:
+      replicas: { type: integer, minimum: 1, default: 1 }
+  ports:
+    - name: in
+      direction: input
+      initiation: push
+      bindings:
+        - { protocol: http/1.1, formats: [json], auth: [none], delivery: [at-most-once, at-least-once] }
+    - name: out
+      direction: output
+      initiation: push
+      bindings:
+        - { protocol: kafka/3, formats: [json], auth: [none, scram-sha-512], brokered: true, delivery: [at-least-once] }
+  deployer:
+    kind: kubernetes
+    kubernetes:
+      primary: KafkaBridge/${instance.name}
+      templates:
+        - apiVersion: kafka.strimzi.io/v1beta2
+          kind: KafkaBridge
+          metadata: { name: "${instance.name}" }
+          spec: { replicas: "${config.replicas}", bootstrapServers: "${connections.out.bootstrap}", http: { port: 8080 } }
+  readiness:
+    strategy: cel
+    rule: "object.status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')"
+    timeout: 5m
+  outputs:
+    url: "http://${instance.name}-bridge-service.${env.namespace}.svc:8080"
+  lifecycle:
+    update: in-place
+    delete: supported
+    rollback: reapply-previous
+    stateful: false

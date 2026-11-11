@@ -1,0 +1,123 @@
+# End-to-end example: an order service that stores orders in PostgreSQL, publishes order events
+# to Kafka, and archives those events to an external S3-compatible bucket.
+#
+# Exercises all three deployer models and all three Glove realization classes:
+#   orders-api   container image        (user service, kubernetes deployer)
+#   orders-db    CloudNativePG operator (operator-managed CR)
+#   events       Strimzi operator       (operator-managed CR)
+#   archive      external S3 API        (http deployer)
+#   db-to-api        pull, config-only           -> R0: inject connection info
+#   api-to-events    push, provisions a topic    -> R1: provision resource
+#   events-to-archive  pull->push mismatch       -> R2: resolver inserts kafka-to-s3 adapter
+#
+# Note what is NOT here: Kubernetes manifests, operator CR fields, connector class names, secret values.
+apiVersion: thanos/v1alpha1
+kind: Project
+metadata:
+  name: order-pipeline
+  displayName: Order pipeline
+  description: Orders API with Postgres storage, Kafka events and S3 archive.
+  labels:
+    team: payments
+spec:
+  technologies:
+    - id: orders-db
+      package: core/postgresql@^1.2
+      config:
+        database: orders
+        instances: 1
+        storageSize: 5Gi
+      deletionPolicy: Retain
+
+    - id: events
+      package: core/kafka@^1.0
+      config:
+        brokers: 1
+        defaultPartitions: 3
+      deletionPolicy: Retain
+
+    - id: orders-api
+      package: core/container@^1.0
+      config:
+        image: registry.example.com/acme/orders-api@sha256:1111111111111111111111111111111111111111111111111111111111111111
+        containerPort: 8080
+        replicas: 2
+        env:
+          LOG_LEVEL: info
+        connections:
+          - name: database
+            direction: input
+            initiation: pull
+            bindings:
+              - { protocol: pgwire/3, formats: [sql], auth: [password] }
+            inject:
+              PGHOST: "${connection.host}"
+              PGPORT: "${connection.port}"
+              PGDATABASE: "${connection.database}"
+              PGUSER: "secretKeyRef(${connection.credentialsSecret}, username)"
+              PGPASSWORD: "secretKeyRef(${connection.credentialsSecret}, password)"
+          - name: order-events
+            direction: output
+            initiation: push
+            bindings:
+              - { protocol: kafka/3, formats: [json], auth: [none], brokered: true, delivery: [at-least-once] }
+            inject:
+              KAFKA_BOOTSTRAP: "${connection.bootstrap}"
+              KAFKA_TOPIC: "${connection.topic}"
+      resources:
+        cpu: 500m
+        memory: 512Mi
+      health:
+        readinessTimeout: 5m
+
+    - id: archive
+      package: core/s3-bucket@^0.3
+      config:
+        endpoint: https://s3.storage.example.internal
+        bucket: acme-order-archive
+        credentials:
+          secretRef: { name: archive-s3-credentials, key: credentials }
+      deletionPolicy: Retain
+
+  gloves:
+    # Input A + Output B: orders-api pulls from orders-db; driver/dialect auto-selected (pgwire/3).
+    - id: db-to-api
+      from: { technology: orders-db, port: sql }
+      to: { technology: orders-api, port: database }
+      binding: auto
+
+    # Output A + Input B: orders-api pushes into Kafka; transport chosen by the user.
+    - id: api-to-events
+      from: { technology: orders-api, port: order-events }
+      to: { technology: events, port: ingest }
+      binding: { protocol: kafka/3, format: json }
+      config:
+        topic: orders.events
+        partitions: 3
+      delivery: { guarantee: at-least-once }
+
+    # Kafka exposes pull; the bucket only accepts push. No direct binding exists, so the
+    # resolver selects an adapter (kafka-to-s3). The user may pin it; here it is left to 'auto'.
+    - id: events-to-archive
+      from: { technology: events, port: subscribe }
+      to: { technology: archive, port: objects }
+      binding: auto
+      config:
+        sourceGlove: api-to-events
+        prefix: orders/
+      delivery: { guarantee: at-least-once, deadLetter: true }
+
+  environments:
+    - name: dev
+      overrides:
+        orders-api: { replicas: 1 }
+    - name: staging
+      overrides:
+        orders-db: { instances: 2 }
+
+layout:
+  nodes:
+    orders-db: { x: 80, y: 260 }
+    orders-api: { x: 380, y: 120 }
+    events: { x: 680, y: 120 }
+    archive: { x: 980, y: 120 }
